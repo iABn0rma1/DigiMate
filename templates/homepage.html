@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>API Documentation</title>
+	<style>
+		* {
+			margin: 0;
+			padding: 0;
+			box-sizing: border-box;
+		}
+
+		body {
+			display: flex;
+			flex-direction: column;
+			min-height: 100vh;
+			font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+			background-color: #121212;
+			color: #ffffff;
+			margin: 0;
+			line-height: 1.6;
+		}
+
+		header {
+			background-color: #1e1e1e;
+			padding: 1.5rem;
+			text-align: center;
+		}
+
+		header h1 {
+			margin: 0;
+			color: #4caf50;
+			font-size: 2rem;
+		}
+
+		.container {
+			flex: 1;
+			padding: 2rem;
+			max-width: 900px;
+			margin: auto;
+		}
+
+		.dropdown {
+			margin-bottom: 1.5rem;
+		}
+
+		.dropdown select {
+			width: 100%;
+			padding: 0.75rem;
+			margin: 0.25rem 0;
+			background-color: #333333;
+			color: #ffffff;
+			border: 1px solid #4caf50;
+			border-radius: 5px;
+			font-size: 1rem;
+		}
+
+		.endpoint {
+			margin-bottom: 2.5rem;
+			padding: 1.5rem;
+			background-color: #1e1e1e;
+			border: 1px solid #4caf50;
+			border-radius: 10px;
+			box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+		}
+
+		.endpoint h3 {
+			margin: 0 0 0.5rem;
+			color: #4caf50;
+			font-size: 1.5rem;
+		}
+
+		.endpoint p {
+			margin-bottom: 1rem;
+			font-size: 1.1rem;
+		}
+
+		.endpoint ul {
+			margin-top: 0.5rem;
+			list-style: disc;
+			margin-left: 2rem;
+			font-size: 1.1rem;
+		}
+
+		.endpoint code {
+			display: block;
+			background-color: #333333;
+			padding: 1rem;
+			border-radius: 5px;
+			font-size: 1rem;
+			color: #f1f1f1;
+			overflow-wrap: break-word;
+			white-space: pre-wrap;
+			width: 100%;
+		}
+
+		.copy-btn {
+			position: absolute;
+			right: 20px;
+			top: 10px;
+			background-color: #4caf50;
+			color: white;
+			border: none;
+			border-radius: 5px;
+			padding: 0.5rem;
+			cursor: pointer;
+			font-size: 0.9rem;
+			transition: background-color 0.3s ease;
+		}
+
+		.copy-btn:hover {
+			background-color: #45a049;
+		}
+
+		footer {
+			background-color: #1e1e1e;
+			text-align: center;
+			padding: 1.5rem;
+			color: #ffffff;
+			margin-top: auto;
+		}
+
+		footer a {
+			color: #4caf50;
+			text-decoration: none;
+			font-size: 1.1rem;
+		}
+
+		footer a:hover {
+			text-decoration: underline;
+		}
+
+		@media (max-width: 768px) {
+			.container {
+				padding: 1rem;
+			}
+
+			header h1 {
+				font-size: 1.5rem;
+			}
+
+			.dropdown select {
+				padding: 0.5rem;
+			}
+		}
+	</style>
+	<script>
+		function navigateToEndpoint() {
+			const selectedPath =
+				document.getElementById("endpoint-dropdown").value;
+			if (selectedPath) {
+				window.location.href = selectedPath;
+			}
+		}
+
+		function copyCode(codeId, buttonId) {
+			const codeElement = document.getElementById(codeId);
+			const buttonElement = document.getElementById(buttonId);
+
+			// Select the text inside the code element
+			const range = document.createRange();
+			range.selectNode(codeElement);
+			window.getSelection().removeAllRanges();
+			window.getSelection().addRange(range);
+			document.execCommand("copy");
+			window.getSelection().removeAllRanges();
+
+			buttonElement.textContent = "Copied!";
+
+			// Revert the button text back to "Copy" after 3 seconds
+			setTimeout(function () {
+				buttonElement.textContent = "Copy";
+			}, 3000);
+		}
+	</script>
+</head>
+
+<body>
+	<header>
+		<h1>API Documentation</h1>
+	</header>
+	<div class="container">
+		<div class="dropdown">
+			<label for="endpoint-dropdown">Jump to Endpoint:</label>
+			<select id="endpoint-dropdown" onchange="navigateToEndpoint()">
+				<option value="">Select an endpoint...</option>
+				{% for endpoint in endpoints %}
+				<option value="{{ endpoint.path }}">
+					{{ endpoint.name }}
+				</option>
+				{% endfor %}
+			</select>
+		</div>
+		{% for endpoint in endpoints %}
+		<div class="endpoint">
+			<h3>{{ endpoint.name }}</h3>
+			<p><strong>Path:</strong> {{ endpoint.path }}</p>
+			<p>{{ endpoint.description }}</p>
+
+			{% if endpoint.params %}
+			<h4>Request Parameters:</h4>
+			<ul>
+				{% for param in endpoint.params %}
+				<li>{{ param }}</li>
+				{% endfor %}
+			</ul>
+			{% endif %}
+
+			<h4>Request Syntax:</h4>
+			<div style="position: relative">
+				<pre id="code-{{ loop.index }}"><code>{{ endpoint.syntax }}</code></pre>
+				<button class="copy-btn" id="btn-{{ loop.index }}"
+					onclick="copyCode('code-{{ loop.index }}', 'btn-{{ loop.index }}')">
+					Copy
+				</button>
+			</div>
+		</div>
+		{% endfor %}
+	</div>
+	<footer>
+		<p>Created with ❤️ using FastAPI</p>
+		<a href="https://fastapi.tiangolo.com/" target="_blank">Learn more about FastAPI</a>
+	</footer>
+</body>
+
+</html>
