@@ -1,26 +1,42 @@
 import os
-import json
-import requests
+import time
+from threading import Timer
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 import google.generativeai as genai
+from elevenlabs.client import ElevenLabs
+import uuid
+import datetime
 
-# ----------------- Configure API -----------------
+# ----------------- Configure APIs -----------------
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 FLASH_API = os.getenv("GOOGLE_API_KEY")
-FINE_API = os.getenv("FINESHARE_API_KEY")
-if not FLASH_API or not FINE_API:
+ELEVEN_API = os.getenv("ELEVENLABS_API_KEY")
+
+if not FLASH_API:
     raise EnvironmentError("Required API keys are not set in the environment variables.")
 
 genai.configure(api_key=FLASH_API)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # ----------------- Constants -----------------
-PET_NAME = "Snowbell"
+PET_NAME = "Whiskers"
+VOICE_ID = os.getenv("VOICE_ID")
 
 GUIDELINES = """
 Guidelines:
@@ -54,30 +70,58 @@ Avoid present-tense action descriptions for the cat; instead, focus on what was 
 Promote kindness, curiosity, and a love for learning, keeping each story fresh and engaging.
 """
 
-# ----------------- Helper Function -----------------
-def generate_audio(text: str) -> str:
+last_request_time = 0  # To track the last API call time
+cooldown_seconds = 30  # Cooldown time in seconds
+
+# ----------------- Helper Functions -----------------
+def schedule_audio_deletion(file_path, delay=60):
     """
-    Sends the generated text to the FineShare API for text-to-speech conversion.
-    Returns the audio file URL if successful.
+    Schedules the deletion of an audio file after `delay` seconds (default is 60 seconds = 1 minute).
     """
-    url = "https://ttsapi.fineshare.com/v1/text-to-speech"
-    headers = {
-        "accept": "text/plain",
-        "x-api-key": FINE_API,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "voice": "whiskers-digitalpet-21143",
-        "amotion": "cheerful",
-        "format": "mp3",
-        "speech": text
-    }
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code == 200:
-        response_data = json.loads(response.text)
-        return response_data.get("downloadUrl", "")
-    else:
-        raise HTTPException(status_code=500, detail=f"TTS API Error: {response.text}")
+    def delete_file():
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            print(f"Deleted audio file: {file_path}")
+
+    Timer(delay, delete_file).start()
+
+def generate_audio(api_key, text, output_format, model_id, output_filename="output.mp3"):
+    """
+    Generates audio from text using the ElevenLabs API and saves it to a file.
+    If an error occurs, it logs the error and returns '404.mp3'.
+    """
+    try:
+        client = ElevenLabs(api_key=api_key)
+
+        # Generate audio using ElevenLabs API
+        audio_generator = client.text_to_speech.convert(
+            voice_id=VOICE_ID,
+            output_format=output_format,
+            text=text,
+            model_id=model_id,
+        )
+
+        # Convert generator to bytes
+        audio_data = b"".join([chunk for chunk in audio_generator])
+
+        # Ensure the static directory exists
+        static_dir = "static"
+        if not os.path.exists(static_dir):
+            os.makedirs(static_dir)
+
+        # Save audio in the static directory
+        output_path = os.path.join(static_dir, output_filename)
+        with open(output_path, "wb") as audio_file:
+            audio_file.write(audio_data)
+
+        # Schedule deletion of the file after 60 seconds
+        schedule_audio_deletion(output_path, delay=60)
+
+        print(f"Audio saved as {output_path}")
+        return f"/static/{output_filename}"
+    except Exception as e: # return default '404.mp3'
+        print(f"Error generating audio: {str(e)}")
+        return "/static/404.mp3"
 
 # ----------------- FastAPI Endpoints -----------------
 class PromptRequest(BaseModel):
@@ -89,17 +133,8 @@ def homepage(request: Request):
         {"name": "App Launch", "path": "/launch", "description": "Generates a welcome story when the app launches.",
          "method": "GET", "params": [], "syntax": "/launch"},
         
-        {"name": "Generate Random", "path": "/generate-random", "description": "Generates a random puzzle or fun learning activity for kids.",
-         "method": "GET", "params": [], "syntax": "/generate-random"},
-        
-        {"name": "Generate Story", "path": "/generate-story", "description": "Generates a story based on user-provided topics. (POST request)",
-         "method": "POST", "params": ["topic (string)"], "syntax": """/generate-story{"topic":"chose_any_topic"}"""},
-
-        {"name": "Query", "path": "/query", "description": "Answers specific user questions in a playful, engaging manner.",
-         "method": "POST", "params": ["question (string)"], "syntax": """/query{"question":"ask_any_question"}"""},
-
-        {"name": "Ask Kids", "path": "/ask-kids", "description": "Generates playful questions to engage kids.",
-         "method": "GET", "params": [], "syntax": "/ask-kids"}
+        {"name": "Interact with kid", "path": "/interact", "description": "Interacts with the kid based on the provided topic.",
+         "method": "GET", "params": [], "syntax": "/interact"},
     ]
     return templates.TemplateResponse("homepage.html", {"request": request, "endpoints": endpoints})
 
@@ -108,64 +143,42 @@ def app_launch():
     try:
         response = model.generate_content(PROMPT_TEMPLATE)
         text = response.text.strip()
-        audio_url = generate_audio(text)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"speech_{timestamp}_{uuid.uuid4().hex}.mp3"
+        audio_url = generate_audio(ELEVEN_API, text, "mp3_44100_64", "eleven_multilingual_v2", filename)
         return {"message": "App launched successfully!", "result": text, "audio_url": audio_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
-@app.get("/generate-random")
-def generate_random():
-    try:
-        random_prompt = f"{PROMPT_TEMPLATE} Make a random puzzle or fun learning activity for kids!"
-        response = model.generate_content(random_prompt)
-        text = response.text.strip()
-        audio_url = generate_audio(text)
-        return {"result": text, "audio_url": audio_url}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+@app.post("/interact")
+def interact(request: PromptRequest):
+    global last_request_time
 
-@app.post("/generate-story")
-def generate_story(request: PromptRequest):
+    # Check cooldown
+    current_time = time.time()
+    time_since_last_request = current_time - last_request_time
+    if time_since_last_request < cooldown_seconds:
+        remaining_time = cooldown_seconds - time_since_last_request
+        return {"error": "Cooldown in effect.", "remaining_time": remaining_time}
+
+    # Update last request time
+    last_request_time = current_time
+
     try:
-        user_prompt = f"{PROMPT_TEMPLATE} Today's topic is {request.topic}. Generate a story about it!"
+        user_prompt = f"""
+        Act as {PET_NAME}, the friendly, adventurous cat, and interact in a playful, engaging, and age-appropriate manner for kids.
+        The kid says:
+        '{request.topic}'
+
+        MUST FOLLOW:
+        {GUIDELINES}
+        """
         response = model.generate_content(user_prompt)
         text = response.text.strip()
-        audio_url = generate_audio(text)
-        return {"result": text, "audio_url": audio_url}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-@app.get("/query")
-def query_user(question: str = Query(..., description="The specific query or question from the user")):
-    try:
-        query_prompt = f"""
-        Act as {PET_NAME}, the friendly, adventurous cat tutor, and answer the following question in a playful, engaging, and age-appropriate manner for kids:
-        '{question}'
-        MUST FOLLOW:
-        {GUIDELINES}
-        """
-        response = model.generate_content(query_prompt)
-        text = response.text.strip()
-        audio_url = generate_audio(text)
-        return {"question": question, "result": text, "audio_url": audio_url}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-@app.get("/ask-kids")
-def ask_kids():
-    try:
-        prompt = f"""
-        Act as a playful, curious tutor for kids under 10 years old. 
-        First, randomly choose an imaginative theme, such as space adventures, underwater worlds, magic forests, playful animals, or any other fun idea that sparks creativity.
-
-        Then, generate a cheerful, age-appropriate question inspired by that theme that encourages kids to share their thoughts, imagination, or daily activities.
-
-        MUST FOLLOW:
-        {GUIDELINES}
-        """
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        audio_url = generate_audio(text)
+        print(text)
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"speech_{timestamp}_{uuid.uuid4().hex}.mp3"
+        audio_url = generate_audio(ELEVEN_API, text, "mp3_44100_64", "eleven_multilingual_v2", filename)
         return {"result": text, "audio_url": audio_url}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
