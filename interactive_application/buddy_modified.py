@@ -1,7 +1,7 @@
+import warnings
 import gradio as gr
 import google.generativeai as genai
 from gtts import gTTS
-import speech_recognition as sr
 import pyttsx3
 import os
 from pathlib import Path
@@ -14,9 +14,15 @@ import numpy as np
 from scipy.io import wavfile
 import tempfile
 from bark import generate_audio, preload_models, SAMPLE_RATE
-from bark import preload_models
 import soundfile as sf
 import random
+import whisper  # Import Whisper for STT
+
+# Optional: Suppress the specific FutureWarning from torch.load in Bark
+warnings.filterwarnings(
+    "ignore", 
+    message="You are using `torch.load` with `weights_only=False`"
+)
 
 # Load the .env file
 load_dotenv()
@@ -26,12 +32,15 @@ gemini_key = os.getenv('GEMINI_API_KEY')
 genai.configure(api_key=gemini_key)
 model = genai.GenerativeModel('gemini-pro')
 
-# Initialize speech recognition
-recognizer = sr.Recognizer()
-
 # Initialize Coqui TTS with Glow-TTS model
 device = "cuda" if torch.cuda.is_available() else "cpu"
 tts = TTS("tts_models/en/ljspeech/glow-tts").to(device)
+
+# Preload Bark models
+preload_models()
+
+# Load OpenAI Whisper model (using the 'base' model; change as needed)
+whisper_model = whisper.load_model("base")
 
 # Directory setup
 responses_dir = Path("responses")
@@ -44,9 +53,6 @@ BUDDY_NAME = "Buddy"
 
 class EmotionalSpeech:
     def __init__(self):
-        # Preload Bark models
-        preload_models()
-        
         self.emotions = {
             "happy": {"voice_preset": "v2/en_speaker_6", "speed": 1.2},
             "sad": {"voice_preset": "v2/en_speaker_3", "speed": 0.8},
@@ -104,7 +110,7 @@ class EmotionalSpeech:
         try:
             # Fallback to Glow-TTS
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
-                self.tts.tts_to_file(
+                tts.tts_to_file(
                     text=f"{random.choice(self.fallback_explanations)} {text}",
                     file_path=temp_file.name,
                     speed=params["speed"]
@@ -196,12 +202,12 @@ class BuddyBear:
 
     def transcribe_audio(self, audio_file):
         try:
-            with sr.AudioFile(audio_file) as source:
-                audio = recognizer.record(source)
-                text = recognizer.recognize_google(audio)
-                return text
+            # Use OpenAI Whisper for transcription
+            result = whisper_model.transcribe(audio_file)
+            text = result["text"].strip()
+            return text
         except Exception as e:
-            print(f"Speech recognition error: {e}")
+            print(f"Whisper transcription error: {e}")
             return None
 
 class ChatInterface:
@@ -299,7 +305,10 @@ class ChatInterface:
 def main():
     chat_interface = ChatInterface()
     demo = chat_interface.create_interface()
-    demo.launch(share=True)
+    # Capture launch output so we can print the URLs
+    launch_info = demo.launch(share=True)
+    # Depending on your Gradio version, launch_info might be a tuple or dict. Try printing it:
+    print("Gradio launch info:", launch_info)
 
 if __name__ == "__main__":
     main()
