@@ -13,10 +13,15 @@ from TTS.api import TTS
 import numpy as np
 from scipy.io import wavfile
 import tempfile
+<<<<<<< HEAD
 from bark import generate_audio, preload_models, SAMPLE_RATE
 from bark import preload_models
 import soundfile as sf
 import random
+=======
+from bark import SAMPLE_RATE, generate_audio, preload_models
+from scipy.io.wavfile import write as write_wav
+>>>>>>> 1d186285b6ffdbe627e9c3120eaba79bd0ce670b
 
 # Load the .env file
 load_dotenv()
@@ -32,6 +37,9 @@ recognizer = sr.Recognizer()
 # Initialize Coqui TTS with Glow-TTS model
 device = "cuda" if torch.cuda.is_available() else "cpu"
 tts = TTS("tts_models/en/ljspeech/glow-tts").to(device)
+
+# Preload Bark models
+preload_models()
 
 # Directory setup
 responses_dir = Path("responses")
@@ -84,6 +92,7 @@ class EmotionalSpeech:
         # Detect emotion if not provided
         if emotion is None:
             emotion = self.detect_emotion(text)
+<<<<<<< HEAD
         
         # Get emotion parameters
         params = self.emotions.get(emotion, self.emotions["calm"])
@@ -114,6 +123,21 @@ class EmotionalSpeech:
         except Exception as glow_error:
             print(f"Glow-TTS generation error: {glow_error}")
             
+=======
+        
+        # Preprocess text to handle short inputs
+        text = self.preprocess_text(text)
+
+        try:
+            # Generate audio using Bark
+            audio_array = generate_audio(text)
+            temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            write_wav(temp_file.name, SAMPLE_RATE, audio_array)
+            return temp_file.name
+        except Exception as e:
+            print(f"Bark TTS error: {e}")
+            # Fall back to gTTS for very short texts or if Glow-TTS fails
+>>>>>>> 1d186285b6ffdbe627e9c3120eaba79bd0ce670b
             try:
                 # Final fallback to gTTS
                 temp_file = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
